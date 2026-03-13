@@ -4,6 +4,13 @@ FROM debian:bookworm
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DOCKER_INSTALL=1
 
+# Build arguments for specifying LoxBerry version
+# Use LBRANCH to install from a specific branch (default: master)
+# Use LBTAG to install a specific tagged release (e.g. 3.0.0.0)
+# If both are set, LBTAG takes precedence.
+ARG LBRANCH=master
+ARG LBTAG=
+
 # Install basic dependencies first
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -20,7 +27,12 @@ COPY install_bookworm.sh /install.sh
 RUN chmod +x /install.sh
 
 # Run the LoxBerry installer in Docker mode
-RUN /install.sh
+# If LBTAG is set, use that; otherwise use LBRANCH
+RUN if [ -n "${LBTAG}" ]; then \
+        /install.sh -t "${LBTAG}"; \
+    else \
+        /install.sh -b "${LBRANCH}"; \
+    fi
 
 # Copy Docker entrypoint script
 COPY docker-entrypoint.sh /docker-entrypoint.sh

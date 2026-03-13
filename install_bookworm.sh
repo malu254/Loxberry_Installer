@@ -202,11 +202,20 @@ if [ $DOCKER_MODE -eq 0 ]; then
 		exit 1
 	fi
 else
-	if [ "$VERSION_ID" != "$TARGET_VERSION_ID" ]; then
-		echo -e "\n${RED}You are running $PRETTY_NAME. This distribution"
-		echo -e "is not supported by LoxBerry.\n"
-		echo -e "We expect $TARGET_PRETTY_NAME as distribution.${RESET}\n"
-		exit 1
+	if [ "$VERSION_ID" -ne "$TARGET_VERSION_ID" ] 2>/dev/null || [ "$VERSION_ID" != "$TARGET_VERSION_ID" ]; then
+		# Use string comparison as fallback since VERSION_ID might not always be numeric
+		if echo "$VERSION_ID" | grep -qE '^[0-9]+$' && echo "$TARGET_VERSION_ID" | grep -qE '^[0-9]+$'; then
+			VCHECK=$(( VERSION_ID != TARGET_VERSION_ID ))
+		else
+			VCHECK=0
+			[ "$VERSION_ID" != "$TARGET_VERSION_ID" ] && VCHECK=1
+		fi
+		if [ $VCHECK -ne 0 ]; then
+			echo -e "\n${RED}You are running $PRETTY_NAME. This distribution"
+			echo -e "is not supported by LoxBerry.\n"
+			echo -e "We expect $TARGET_PRETTY_NAME as distribution.${RESET}\n"
+			exit 1
+		fi
 	fi
 fi
 
@@ -620,6 +629,12 @@ fi
 
 TITLE "Configuring PHP ${PHPVER_PROD}..."
 
+# In Docker mode, if PHP 7.4 is not available (sury.org may not be reachable), fall back to PHP 8.2
+if [ $DOCKER_MODE -eq 1 ] && [ ! -e /etc/php/${PHPVER_PROD} ]; then
+	WARNING "PHP ${PHPVER_PROD} not found (sury.org may be unavailable). Falling back to PHP ${PHPVER_TEST}."
+	PHPVER_PROD=$PHPVER_TEST
+fi
+
 if [ ! -e /etc/php/${PHPVER_PROD} ]; then
 	FAIL "Could not set up PHP - target folder /etc/php/${PHPVER_PROD} does not exist.\n"
 	exit 1
@@ -644,26 +659,27 @@ fi
 
 TITLE "Configuring PHP ${PHPVER_TEST}..."
 
-if [ ! -e /etc/php/${PHPVER_TEST} ]; then
-	FAIL "Could not set up PHP - target folder /etc/php/${PHPVER_TEST} does not exist.\n"
-	exit 1
-fi
-
-mkdir -p /etc/php/${PHPVER_TEST}/apache2/conf.d
-mkdir -p /etc/php/${PHPVER_TEST}/cgi/conf.d
-mkdir -p /etc/php/${PHPVER_TEST}/cli/conf.d
-rm /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry.ini
-rm /etc/php/${PHPVER_TEST}/cgi/conf.d/20-loxberry.ini
-rm /etc/php/${PHPVER_TEST}/cli/conf.d/20-loxberry.ini
-ln -s $LBHOME/system/php/loxberry-apache.ini /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry-apache.ini
-ln -s $LBHOME/system/php/loxberry-apache.ini /etc/php/${PHPVER_TEST}/cgi/conf.d/20-loxberry-apache.ini
-ln -s $LBHOME/system/php/loxberry-cli.ini /etc/php/${PHPVER_TEST}/cli/conf.d/20-loxberry-cli.ini
-
-if [ ! -L  /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry-apache.ini ]; then
-	FAIL "Could not set up PHP ${PHPVER_TEST}.\n"
-	exit 1
+if [ "$PHPVER_PROD" = "$PHPVER_TEST" ]; then
+	OK "PHP ${PHPVER_TEST} already configured above (same as production version in this environment)."
+elif [ ! -e /etc/php/${PHPVER_TEST} ]; then
+	WARNING "Could not set up PHP ${PHPVER_TEST} - target folder does not exist. Skipping."
 else
-	OK "Successfully set up PHP ${PHPVER_TEST}."
+	mkdir -p /etc/php/${PHPVER_TEST}/apache2/conf.d
+	mkdir -p /etc/php/${PHPVER_TEST}/cgi/conf.d
+	mkdir -p /etc/php/${PHPVER_TEST}/cli/conf.d
+	rm /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry.ini 2>/dev/null || true
+	rm /etc/php/${PHPVER_TEST}/cgi/conf.d/20-loxberry.ini 2>/dev/null || true
+	rm /etc/php/${PHPVER_TEST}/cli/conf.d/20-loxberry.ini 2>/dev/null || true
+	ln -s $LBHOME/system/php/loxberry-apache.ini /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry-apache.ini
+	ln -s $LBHOME/system/php/loxberry-apache.ini /etc/php/${PHPVER_TEST}/cgi/conf.d/20-loxberry-apache.ini
+	ln -s $LBHOME/system/php/loxberry-cli.ini /etc/php/${PHPVER_TEST}/cli/conf.d/20-loxberry-cli.ini
+
+	if [ ! -L  /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry-apache.ini ]; then
+		FAIL "Could not set up PHP ${PHPVER_TEST}.\n"
+		exit 1
+	else
+		OK "Successfully set up PHP ${PHPVER_TEST}."
+	fi
 fi
 
 
@@ -691,9 +707,11 @@ fi
 
 a2dismod php*
 a2dissite 001-default-ssl
-rm $LBHOME/system/apache2/mods-available/php*
-rm $LBHOME/system/apache2/mods-enabled/php*
-cp /etc/apache2.orig/mods-available/php* /etc/apache2/mods-available
+rm $LBHOME/system/apache2/mods-available/php* 2>/dev/null || true
+rm $LBHOME/system/apache2/mods-enabled/php* 2>/dev/null || true
+if [ -e /etc/apache2.orig/mods-available ]; then
+	cp /etc/apache2.orig/mods-available/php* /etc/apache2/mods-available 2>/dev/null || true
+fi
 a2enmod php${PHPVER_PROD}
 
 # Disable PrivateTmp for Apache2 on systemd

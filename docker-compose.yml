@@ -5,6 +5,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Specify a branch (default: master) or a tag (e.g. 3.0.0.0)
+        LBRANCH: master
+        # LBTAG: "3.0.0.0"   # Uncomment to install a specific tagged release
     container_name: loxberry
     hostname: loxberry
     restart: unless-stopped

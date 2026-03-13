@@ -58,7 +58,7 @@ echo "[entrypoint] Web interface available at http://localhost/"
 echo "[entrypoint] Default credentials: loxberry / loxberry"
 
 # Keep the container running and tail logs
-exec tail -F \
+exec tail -F --retry \
     /var/log/apache2/error.log \
     /var/log/apache2/access.log \
     "$LBHOME/log/system/system.log" \
