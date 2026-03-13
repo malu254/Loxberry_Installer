@@ -17,6 +17,14 @@ export LBHOMEDIR=$LBHOME
 export PERL5LIB=$LBHOME/libs/perllib
 export APT_LISTCHANGES_FRONTEND="none"
 export DEBIAN_FRONTEND="noninteractive"
+export PATH=$PATH:/usr/sbin/
+
+# Detect Docker environment
+if [ -f /.dockerenv ] || [ "${DOCKER_INSTALL}" = "1" ]; then
+    DOCKER_MODE=1
+else
+    DOCKER_MODE=0
+fi
 
 # Run as root
 if (( $EUID != 0 )); then
@@ -24,15 +32,19 @@ if (( $EUID != 0 )); then
     exit 1
 fi
 
-if [ -e /boot/rootfsresized ]; then
+if [ $DOCKER_MODE -eq 0 ] && [ -e /boot/rootfsresized ]; then
 	echo "This script was already executed on this LoxBerry. You cannot reinstall LoxBerry."
 	echo "If you are sure what you are doing, rm /boot/rootfsresized and restart again."
 	exit 1
 fi
 
-echo -e "\n\nNote! If you were logged in as user 'loxberry' and used 'su' to switch to the root account, your connection may be lost now...\n\n"
-killall -u loxberry
-sleep 3
+if [ $DOCKER_MODE -eq 0 ]; then
+	echo -e "\n\nNote! If you were logged in as user 'loxberry' and used 'su' to switch to the root account, your connection may be lost now...\n\n"
+fi
+killall -u loxberry 2>/dev/null || true
+if [ $DOCKER_MODE -eq 0 ]; then
+	sleep 3
+fi
 
 # Commandline options
 while getopts "t:b:" o; do
@@ -54,43 +66,45 @@ apt-get -y --allow-unauthenticated --allow-downgrades --allow-remove-essential -
 apt-get --no-install-recommends -y --allow-unauthenticated --fix-broken --reinstall --allow-downgrades --allow-remove-essential --allow-change-held-packages install jq git lsb-release
 
 # Stop loxberry Service
-if /bin/systemctl --no-pager status apache2.service; then
-	/bin/systemctl stop apache2.service
-fi
-if /bin/systemctl --no-pager status loxberry.service; then
-	/bin/systemctl disable loxberry.service
-	/bin/systemctl stop loxberry.service
-fi
-if /bin/systemctl --no-pager status ssdpd.service; then
-	/bin/systemctl disable ssdpd.service
-	/bin/systemctl stop ssdpd.service
-fi
-if /bin/systemctl --no-pager status mosquitto.service; then
-	/bin/systemctl disable mosquitto.service
-	/bin/systemctl stop mosquitto.service
-fi
-if /bin/systemctl --no-pager status createtmpfs.service; then
-	/bin/systemctl disable createtmpfs.service
-	/bin/systemctl stop createtmpfs.service
-	echo -e "\nThere are some old mounts of tmpfs filesystems. Please reboot and start installation again.\n"
-	exit 1
+if [ $DOCKER_MODE -eq 0 ]; then
+	if /bin/systemctl --no-pager status apache2.service; then
+		/bin/systemctl stop apache2.service
+	fi
+	if /bin/systemctl --no-pager status loxberry.service; then
+		/bin/systemctl disable loxberry.service
+		/bin/systemctl stop loxberry.service
+	fi
+	if /bin/systemctl --no-pager status ssdpd.service; then
+		/bin/systemctl disable ssdpd.service
+		/bin/systemctl stop ssdpd.service
+	fi
+	if /bin/systemctl --no-pager status mosquitto.service; then
+		/bin/systemctl disable mosquitto.service
+		/bin/systemctl stop mosquitto.service
+	fi
+	if /bin/systemctl --no-pager status createtmpfs.service; then
+		/bin/systemctl disable createtmpfs.service
+		/bin/systemctl stop createtmpfs.service
+		echo -e "\nThere are some old mounts of tmpfs filesystems. Please reboot and start installation again.\n"
+		exit 1
+	fi
 fi
 
 # Clear screen
-tput clear
+tput clear 2>/dev/null || true
 
 # Formating - to be used in echo's
-BLACK=`tput setaf 0`
-RED=`tput setaf 1`
-GREEN=`tput setaf 2`
-YELLOW=`tput setaf 3`
-BLUE=`tput setaf 4`
-MAGENTA=`tput setaf 5`
-CYAN=`tput setaf 6`
-WHITE=`tput setaf 7`
-BOLD=`tput bold`
-ULINE=`tput smul`
-RESET=`tput sgr0`
+BLACK=`tput setaf 0 2>/dev/null || echo ""`
+RED=`tput setaf 1 2>/dev/null || echo ""`
+GREEN=`tput setaf 2 2>/dev/null || echo ""`
+YELLOW=`tput setaf 3 2>/dev/null || echo ""`
+BLUE=`tput setaf 4 2>/dev/null || echo ""`
+MAGENTA=`tput setaf 5 2>/dev/null || echo ""`
+CYAN=`tput setaf 6 2>/dev/null || echo ""`
+WHITE=`tput setaf 7 2>/dev/null || echo ""`
+BOLD=`tput bold 2>/dev/null || echo ""`
+ULINE=`tput smul 2>/dev/null || echo ""`
+RESET=`tput sgr0 2>/dev/null || echo ""`
 
 ########################################################################
 # Functions
@@ -98,7 +112,7 @@ RESET=`tput sgr0`
 # Horizontal Rule
 HR () {
 	echo -en "${!1}"
-	printf '%.s─' $(seq 1 $(tput cols))
+	printf '%.s─' $(seq 1 $(tput cols 2>/dev/null || echo 80))
 	echo -e "${RESET}"
 }
 
@@ -172,19 +186,37 @@ if [ -e /boot/dietpi/.version ]; then
 fi
 
 # Check correct distribution
-if [ ! -e /boot/dietpi/.version ]; then
-	echo -e "\n${RED}This seems not to be a DietPi Image. LoxBerry can only be installed on DietPi.\n"
-	echo -e "We expect $TARGET_PRETTY_NAME as distribution."
-	echo -e "Please download the correct image from ${ULINE}https://dietpi.com\n${RESET}"
-	exit 1
-fi
+if [ $DOCKER_MODE -eq 0 ]; then
+	if [ ! -e /boot/dietpi/.version ]; then
+		echo -e "\n${RED}This seems not to be a DietPi Image. LoxBerry can only be installed on DietPi.\n"
+		echo -e "We expect $TARGET_PRETTY_NAME as distribution."
+		echo -e "Please download the correct image from ${ULINE}https://dietpi.com\n${RESET}"
+		exit 1
+	fi
 
-if [ $VERSION_ID -ne $TARGET_VERSION_ID ]; then
-	echo -e "\n${RED}You are running $PRETTY_NAME. This distribution"
-	echo -e "is not supported by LoxBerry.\n"
-	echo -e "We expect $TARGET_PRETTY_NAME as distribution."
-	echo -e "Please download the correct image from ${ULINE}https://dietpi.com\n${RESET}"
-	exit 1
+	if [ $VERSION_ID -ne $TARGET_VERSION_ID ]; then
+		echo -e "\n${RED}You are running $PRETTY_NAME. This distribution"
+		echo -e "is not supported by LoxBerry.\n"
+		echo -e "We expect $TARGET_PRETTY_NAME as distribution."
+		echo -e "Please download the correct image from ${ULINE}https://dietpi.com\n${RESET}"
+		exit 1
+	fi
+else
+	if [ "$VERSION_ID" -ne "$TARGET_VERSION_ID" ] 2>/dev/null || [ "$VERSION_ID" != "$TARGET_VERSION_ID" ]; then
+		# Use string comparison as fallback since VERSION_ID might not always be numeric
+		if echo "$VERSION_ID" | grep -qE '^[0-9]+$' && echo "$TARGET_VERSION_ID" | grep -qE '^[0-9]+$'; then
+			VCHECK=$(( VERSION_ID != TARGET_VERSION_ID ))
+		else
+			VCHECK=0
+			[ "$VERSION_ID" != "$TARGET_VERSION_ID" ] && VCHECK=1
+		fi
+		if [ $VCHECK -ne 0 ]; then
+			echo -e "\n${RED}You are running $PRETTY_NAME. This distribution"
+			echo -e "is not supported by LoxBerry.\n"
+			echo -e "We expect $TARGET_PRETTY_NAME as distribution.${RESET}\n"
+			exit 1
+		fi
+	fi
 fi
 
 # Get latest release
@@ -213,16 +245,21 @@ fi
 
 # Welcome screen with overview
 echo -e "\nThis script will install ${BOLD}${ULINE}LoxBerry $LBVERSION${RESET} on your system.\n"
-echo -e "${RED}${BOLD}WARNING!${RESET}${RED} You cannot undo the installation! Your system will be converted"
-echo -e "into a LoxBerry with no return! Nothing will be like it was before ;-)${RESET}"
-echo -e "\n${ULINE}Your system seems to be:${RESET}\n"
-echo -e "Distribution:       $PRETTY_NAME"
-echo -e "DietPi Version:     $G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB"
-echo -e "Hardware Model:     $G_HW_MODEL_NAME"
-echo -e "Architecture:       $G_HW_ARCH_NAME"
-echo -e "\n\nHit ${BOLD}<CTRL>+C${RESET} now to stop, any other input will continue.\n"
-read -n 1 -s -r -p "Press any key to continue"
-tput clear
+if [ $DOCKER_MODE -eq 0 ]; then
+	echo -e "${RED}${BOLD}WARNING!${RESET}${RED} You cannot undo the installation! Your system will be converted"
+	echo -e "into a LoxBerry with no return! Nothing will be like it was before ;-)${RESET}"
+	echo -e "\n${ULINE}Your system seems to be:${RESET}\n"
+	echo -e "Distribution:       $PRETTY_NAME"
+	echo -e "DietPi Version:     $G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB"
+	echo -e "Hardware Model:     $G_HW_MODEL_NAME"
+	echo -e "Architecture:       $G_HW_ARCH_NAME"
+	echo -e "\n\nHit ${BOLD}<CTRL>+C${RESET} now to stop, any other input will continue.\n"
+	read -n 1 -s -r -p "Press any key to continue"
+	tput clear 2>/dev/null || true
+else
+	echo -e "${YELLOW}Running in Docker mode - non-interactive installation.${RESET}"
+	echo -e "Distribution:       $PRETTY_NAME"
+fi
 
 # Download Release
 TITLE "Downloading LoxBerry sources from GitHub..."
@@ -266,8 +303,10 @@ fi
 # Adding User loxberry
 TITLE "Adding user 'loxberry', setting default passwd, resetting user 'dietpi'..."
 
-killall -u loxberry
-sleep 3
+killall -u loxberry 2>/dev/null || true
+if [ $DOCKER_MODE -eq 0 ]; then
+	sleep 3
+fi
 
 deluser --quiet loxberry > /dev/null 2>&1
 adduser --no-create-home --home $LBHOME --disabled-password --gecos "" loxberry
@@ -294,29 +333,42 @@ else
 	OK "Successfully set default password for user 'root'."
 fi
 
-newdietpipassword=$(echo $random | md5sum | head -c 20; echo)
-echo "dietpi:$newdietpipassword" | /usr/sbin/chpasswd -c SHA512
-if [ $? != 0 ]; then
-	FAIL "Could not set password for user 'dietpi'.\n"
-	exit 1
-else
-	OK "Successfully set default password for user 'dietpi'."
+if [ $DOCKER_MODE -eq 0 ]; then
+	newdietpipassword=$(echo $random | md5sum | head -c 20; echo)
+	echo "dietpi:$newdietpipassword" | /usr/sbin/chpasswd -c SHA512
+	if [ $? != 0 ]; then
+		FAIL "Could not set password for user 'dietpi'.\n"
+		exit 1
+	else
+		OK "Successfully set default password for user 'dietpi'."
+	fi
 fi
 
 
 # Configuring hardware architecture
-TITLE "Configuring your hardware architecture $G_HW_ARCH_NAM..."
+TITLE "Configuring your hardware architecture..."
 
-HWMODELFILENAME=$(cat /boot/dietpi/func/dietpi-obtain_hw_model | grep "G_HW_MODEL $G_HW_MODEL " | awk '/.*G_HW_MODEL .*/ {for(i=4; i<=NF; ++i) printf "%s_", $i; print ""}' | sed 's/\//_/g' | sed 's/[()]//g' | sed 's/_$//' | tr '[:upper:]' '[:lower:]')
-echo $HWMODELFILENAME > $LBHOME/config/system/is_hwmodel_$HWMODELFILENAME.cfg
-echo $G_HW_ARCH_NAME > $LBHOME/config/system/is_arch_$G_HW_ARCH_NAME.cfg
+if [ $DOCKER_MODE -eq 1 ]; then
+	# In Docker mode, detect architecture using uname
+	G_HW_ARCH_NAME=$(uname -m)
+	HWMODELFILENAME="docker_${G_HW_ARCH_NAME}"
+	echo $HWMODELFILENAME > $LBHOME/config/system/is_hwmodel_$HWMODELFILENAME.cfg
+	echo $G_HW_ARCH_NAME > $LBHOME/config/system/is_arch_$G_HW_ARCH_NAME.cfg
+	if echo $G_HW_ARCH_NAME | grep -q "x86_64"; then
+		echo "x64" > $LBHOME/config/system/is_x64.cfg
+	fi
+else
+	HWMODELFILENAME=$(cat /boot/dietpi/func/dietpi-obtain_hw_model | grep "G_HW_MODEL $G_HW_MODEL " | awk '/.*G_HW_MODEL .*/ {for(i=4; i<=NF; ++i) printf "%s_", $i; print ""}' | sed 's/\//_/g' | sed 's/[()]//g' | sed 's/_$//' | tr '[:upper:]' '[:lower:]')
+	echo $HWMODELFILENAME > $LBHOME/config/system/is_hwmodel_$HWMODELFILENAME.cfg
+	echo $G_HW_ARCH_NAME > $LBHOME/config/system/is_arch_$G_HW_ARCH_NAME.cfg
 
-# Compatibility - this was standard until LB3.0.0.0
-if echo $HWMODELFILENAME | grep -q "x86_64"; then
-	echo "x64" > $LBHOME/config/system/is_x64.cfg
-fi
-if echo $HWMODELFILENAME | grep -q "raspberry"; then
-	echo "raspberry" > $LBHOME/config/system/is_raspberry.cfg
+	# Compatibility - this was standard until LB3.0.0.0
+	if echo $HWMODELFILENAME | grep -q "x86_64"; then
+		echo "x64" > $LBHOME/config/system/is_x64.cfg
+	fi
+	if echo $HWMODELFILENAME | grep -q "raspberry"; then
+		echo "raspberry" > $LBHOME/config/system/is_raspberry.cfg
+	fi
 fi
 
 if [ ! -e $LBHOME/config/system/is_arch_$G_HW_ARCH_NAME.cfg ]; then
@@ -328,14 +380,20 @@ fi
 
 # Installing OpenSSH Server
 TITLE "Installing OpenSSH server..."
-/boot/dietpi/dietpi-software install 105
+if [ $DOCKER_MODE -eq 1 ]; then
+	apt-get --no-install-recommends -y --allow-unauthenticated --fix-broken --reinstall --allow-downgrades --allow-remove-essential --allow-change-held-packages install openssh-server
+else
+	/boot/dietpi/dietpi-software install 105
+fi
 
 # Configuring hardware architecture
 TITLE "Installing additional software packages from apt repository..."
 
-/boot/dietpi/func/dietpi-set_software apt reset
-/boot/dietpi/func/dietpi-set_software apt compress disable
-/boot/dietpi/func/dietpi-set_software apt cache clean
+if [ $DOCKER_MODE -eq 0 ]; then
+	/boot/dietpi/func/dietpi-set_software apt reset
+	/boot/dietpi/func/dietpi-set_software apt compress disable
+	/boot/dietpi/func/dietpi-set_software apt cache clean
+fi
 
 # Configure PHP - we want PHP7.4 as default while Bookworm only has 8.2
 curl -sL https://packages.sury.org/php/apt.gpg | gpg --dearmor | tee /usr/share/keyrings/deb.sury.org-php.gpg >/dev/null
@@ -385,8 +443,10 @@ else
         OK "Successfully installed all queued packages.\n"
 fi
 
-/boot/dietpi/func/dietpi-set_software apt compress enable
-/boot/dietpi/func/dietpi-set_software apt cache clean
+if [ $DOCKER_MODE -eq 0 ]; then
+	/boot/dietpi/func/dietpi-set_software apt compress enable
+	/boot/dietpi/func/dietpi-set_software apt cache clean
+fi
 apt-get -y --allow-unauthenticated --allow-downgrades --allow-remove-essential --allow-change-held-packages --allow-releaseinfo-change update
 
 # Remove dhcpd - See issue 135
@@ -404,15 +464,17 @@ apt-get -y --allow-unauthenticated --fix-broken --reinstall --allow-downgrades -
 # Adding user loxberry to different additional groups
 TITLE "Adding user LoxBerry to some additional groups..."
 
-# Group membership
-/usr/sbin/usermod -a -G dialout loxberry
-/usr/sbin/usermod -a -G audio loxberry
-/usr/sbin/usermod -a -G gpio loxberry
-/usr/sbin/usermod -a -G tty loxberry
-/usr/sbin/usermod -a -G www-data loxberry
-/usr/sbin/usermod -a -G video loxberry
-/usr/sbin/usermod -a -G i2c loxberry
-/usr/sbin/usermod -a -G dietpi loxberry
+# Group membership - skip groups that may not exist in Docker
+getent group dialout > /dev/null 2>&1 && /usr/sbin/usermod -a -G dialout loxberry || WARNING "Group 'dialout' not found, skipping."
+getent group audio > /dev/null 2>&1 && /usr/sbin/usermod -a -G audio loxberry || WARNING "Group 'audio' not found, skipping."
+getent group gpio > /dev/null 2>&1 && /usr/sbin/usermod -a -G gpio loxberry || WARNING "Group 'gpio' not found, skipping."
+getent group tty > /dev/null 2>&1 && /usr/sbin/usermod -a -G tty loxberry || WARNING "Group 'tty' not found, skipping."
+getent group www-data > /dev/null 2>&1 && /usr/sbin/usermod -a -G www-data loxberry || WARNING "Group 'www-data' not found, skipping."
+getent group video > /dev/null 2>&1 && /usr/sbin/usermod -a -G video loxberry || WARNING "Group 'video' not found, skipping."
+getent group i2c > /dev/null 2>&1 && /usr/sbin/usermod -a -G i2c loxberry || WARNING "Group 'i2c' not found, skipping."
+if [ $DOCKER_MODE -eq 0 ]; then
+	getent group dietpi > /dev/null 2>&1 && /usr/sbin/usermod -a -G dietpi loxberry || WARNING "Group 'dietpi' not found, skipping."
+fi
 
 OK "Successfully configured additional groups."
 
@@ -494,74 +556,84 @@ fi
 # Setting up Initskript for LoxBerry
 TITLE "Setting up Service files for LoxBerry..."
 
-# LoxBerry Init Script
-if [ -e /etc/systemd/system/loxberry.service ]; then
-	rm /etc/systemd/system/loxberry.service
-fi
-ln -s $LBHOME/system/systemd/loxberry.service /etc/systemd/system/loxberry.service
-echo ""
-/bin/systemctl daemon-reload
-/bin/systemctl enable loxberry.service
+if [ $DOCKER_MODE -eq 0 ]; then
+	# LoxBerry Init Script
+	if [ -e /etc/systemd/system/loxberry.service ]; then
+		rm /etc/systemd/system/loxberry.service
+	fi
+	ln -s $LBHOME/system/systemd/loxberry.service /etc/systemd/system/loxberry.service
+	echo ""
+	/bin/systemctl daemon-reload
+	/bin/systemctl enable loxberry.service
 
-if ! /bin/systemctl is-enabled loxberry.service; then
-	FAIL "Could not set up Service for LoxBerry.\n"
-	exit 1
+	if ! /bin/systemctl is-enabled loxberry.service; then
+		FAIL "Could not set up Service for LoxBerry.\n"
+		exit 1
+	else
+		OK "Successfully set up service for LoxBerry."
+	fi
+
+	# Createtmpfs Init Script
+	if [ -e /etc/systemd/system/createtmpfs.service ]; then
+		rm /etc/systemd/system/createtmpfs.service
+	fi
+	ln -s $LBHOME/system/systemd/createtmpfs.service /etc/systemd/system/createtmpfs.service
+	echo ""
+	/bin/systemctl daemon-reload
+	/bin/systemctl enable createtmpfs.service
+
+	if ! /bin/systemctl is-enabled createtmpfs.service; then
+		FAIL "Could not set up Service for Createtmpfs.\n"
+		exit 1
+	else
+		OK "Successfully set up service for Createtmpfs."
+	fi
+
+	# LoxBerry SSDPD Service
+	if [ -e /etc/systemd/system/ssdpd.service ]; then
+		rm /etc/systemd/system/ssdpd.service
+	fi
+	ln -s $LBHOME/system/systemd/ssdpd.service /etc/systemd/system/ssdpd.service
+	echo ""
+	/bin/systemctl daemon-reload
+	/bin/systemctl enable ssdpd.service
+
+	if ! /bin/systemctl is-enabled ssdpd.service; then
+		FAIL "Could not set up Service for SSDPD.\n"
+		exit 1
+	else
+		OK "Successfully set up service for SSDPD."
+	fi
+
+	# LoxBerry Mosquitto Service
+	if [ -e /etc/systemd/system/mosquitto.service ]; then
+		rm /etc/systemd/system/mosquitto.service
+	fi
+	ln -s $LBHOME/system/systemd/mosquitto.service /etc/systemd/system/mosquitto.service
+	echo ""
+	/bin/systemctl daemon-reload
+	/bin/systemctl enable mosquitto.service
+
+	if ! /bin/systemctl is-enabled mosquitto.service; then
+		FAIL "Could not set up Service for Mosquitto.\n"
+		exit 1
+	else
+		OK "Successfully set up service for Mosquitto."
+	fi
 else
-	OK "Successfully set up service for LoxBerry."
-fi
-
-# Createtmpfs Init Script
-if [ -e /etc/systemd/system/createtmpfs.service ]; then
-	rm /etc/systemd/system/createtmpfs.service
-fi
-ln -s $LBHOME/system/systemd/createtmpfs.service /etc/systemd/system/createtmpfs.service
-echo ""
-/bin/systemctl daemon-reload
-/bin/systemctl enable createtmpfs.service
-
-if ! /bin/systemctl is-enabled createtmpfs.service; then
-	FAIL "Could not set up Service for Createtmpfs.\n"
-	exit 1
-else
-	OK "Successfully set up service for Createtmpfs."
-fi
-
-# LoxBerry SSDPD Service
-if [ -e /etc/systemd/system/ssdpd.service ]; then
-	rm /etc/systemd/system/ssdpd.service
-fi
-ln -s $LBHOME/system/systemd/ssdpd.service /etc/systemd/system/ssdpd.service
-echo ""
-/bin/systemctl daemon-reload
-/bin/systemctl enable ssdpd.service
-
-if ! /bin/systemctl is-enabled ssdpd.service; then
-	FAIL "Could not set up Service for SSDPD.\n"
-	exit 1
-else
-	OK "Successfully set up service for SSDPD."
-fi
-
-# LoxBerry Mosquitto Service
-if [ -e /etc/systemd/system/mosquitto.service ]; then
-	rm /etc/systemd/system/mosquitto.service
-fi
-ln -s $LBHOME/system/systemd/mosquitto.service /etc/systemd/system/mosquitto.service
-echo ""
-/bin/systemctl daemon-reload
-/bin/systemctl enable mosquitto.service
-
-if ! /bin/systemctl is-enabled mosquitto.service; then
-	FAIL "Could not set up Service for Mosquitto.\n"
-	exit 1
-else
-	OK "Successfully set up service for Mosquitto."
+	OK "Docker mode: skipping systemd service setup (services will be started by entrypoint)."
 fi
 
 # PHP - we install PHP8.2 for testing and 7.4 for production
 #apt-get --no-install-recommends -y --allow-unauthenticated --fix-broken --reinstall --allow-downgrades --allow-remove-essential --allow-change-held-packages install php${PHPVER_TEST} php${PHPVER_PROD}
 
 TITLE "Configuring PHP ${PHPVER_PROD}..."
+
+# In Docker mode, if PHP 7.4 is not available (sury.org may not be reachable), fall back to PHP 8.2
+if [ $DOCKER_MODE -eq 1 ] && [ ! -e /etc/php/${PHPVER_PROD} ]; then
+	WARNING "PHP ${PHPVER_PROD} not found (sury.org may be unavailable). Falling back to PHP ${PHPVER_TEST}."
+	PHPVER_PROD=$PHPVER_TEST
+fi
 
 if [ ! -e /etc/php/${PHPVER_PROD} ]; then
 	FAIL "Could not set up PHP - target folder /etc/php/${PHPVER_PROD} does not exist.\n"
@@ -587,26 +659,27 @@ fi
 
 TITLE "Configuring PHP ${PHPVER_TEST}..."
 
-if [ ! -e /etc/php/${PHPVER_TEST} ]; then
-	FAIL "Could not set up PHP - target folder /etc/php/${PHPVER_TEST} does not exist.\n"
-	exit 1
-fi
-
-mkdir -p /etc/php/${PHPVER_TEST}/apache2/conf.d
-mkdir -p /etc/php/${PHPVER_TEST}/cgi/conf.d
-mkdir -p /etc/php/${PHPVER_TEST}/cli/conf.d
-rm /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry.ini
-rm /etc/php/${PHPVER_TEST}/cgi/conf.d/20-loxberry.ini
-rm /etc/php/${PHPVER_TEST}/cli/conf.d/20-loxberry.ini
-ln -s $LBHOME/system/php/loxberry-apache.ini /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry-apache.ini
-ln -s $LBHOME/system/php/loxberry-apache.ini /etc/php/${PHPVER_TEST}/cgi/conf.d/20-loxberry-apache.ini
-ln -s $LBHOME/system/php/loxberry-cli.ini /etc/php/${PHPVER_TEST}/cli/conf.d/20-loxberry-cli.ini
-
-if [ ! -L  /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry-apache.ini ]; then
-	FAIL "Could not set up PHP ${PHPVER_TEST}.\n"
-	exit 1
+if [ "$PHPVER_PROD" = "$PHPVER_TEST" ]; then
+	OK "PHP ${PHPVER_TEST} already configured above (same as production version in this environment)."
+elif [ ! -e /etc/php/${PHPVER_TEST} ]; then
+	WARNING "Could not set up PHP ${PHPVER_TEST} - target folder does not exist. Skipping."
 else
-	OK "Successfully set up PHP ${PHPVER_TEST}."
+	mkdir -p /etc/php/${PHPVER_TEST}/apache2/conf.d
+	mkdir -p /etc/php/${PHPVER_TEST}/cgi/conf.d
+	mkdir -p /etc/php/${PHPVER_TEST}/cli/conf.d
+	rm /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry.ini 2>/dev/null || true
+	rm /etc/php/${PHPVER_TEST}/cgi/conf.d/20-loxberry.ini 2>/dev/null || true
+	rm /etc/php/${PHPVER_TEST}/cli/conf.d/20-loxberry.ini 2>/dev/null || true
+	ln -s $LBHOME/system/php/loxberry-apache.ini /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry-apache.ini
+	ln -s $LBHOME/system/php/loxberry-apache.ini /etc/php/${PHPVER_TEST}/cgi/conf.d/20-loxberry-apache.ini
+	ln -s $LBHOME/system/php/loxberry-cli.ini /etc/php/${PHPVER_TEST}/cli/conf.d/20-loxberry-cli.ini
+
+	if [ ! -L  /etc/php/${PHPVER_TEST}/apache2/conf.d/20-loxberry-apache.ini ]; then
+		FAIL "Could not set up PHP ${PHPVER_TEST}.\n"
+		exit 1
+	else
+		OK "Successfully set up PHP ${PHPVER_TEST}."
+	fi
 fi
 
 
@@ -634,45 +707,55 @@ fi
 
 a2dismod php*
 a2dissite 001-default-ssl
-rm $LBHOME/system/apache2/mods-available/php*
-rm $LBHOME/system/apache2/mods-enabled/php*
-cp /etc/apache2.orig/mods-available/php* /etc/apache2/mods-available
+rm $LBHOME/system/apache2/mods-available/php* 2>/dev/null || true
+rm $LBHOME/system/apache2/mods-enabled/php* 2>/dev/null || true
+if [ -e /etc/apache2.orig/mods-available ]; then
+	cp /etc/apache2.orig/mods-available/php* /etc/apache2/mods-available 2>/dev/null || true
+fi
 a2enmod php${PHPVER_PROD}
 
 # Disable PrivateTmp for Apache2 on systemd
-if [ ! -e /etc/systemd/system/apache2.service.d/privatetmp.conf ]; then
-	mkdir -p /etc/systemd/system/apache2.service.d
-	ln -s $LBHOME/system/systemd/apache-privatetmp.conf /etc/systemd/system/apache2.service.d/privatetmp.conf
-fi
+if [ $DOCKER_MODE -eq 0 ]; then
+	if [ ! -e /etc/systemd/system/apache2.service.d/privatetmp.conf ]; then
+		mkdir -p /etc/systemd/system/apache2.service.d
+		ln -s $LBHOME/system/systemd/apache-privatetmp.conf /etc/systemd/system/apache2.service.d/privatetmp.conf
+	fi
 
-if [ ! -L  /etc/systemd/system/apache2.service.d/privatetmp.conf ]; then
-	FAIL "Could not set up Apache2 Private Temp Config.\n"
-	exit 1
+	if [ ! -L  /etc/systemd/system/apache2.service.d/privatetmp.conf ]; then
+		FAIL "Could not set up Apache2 Private Temp Config.\n"
+		exit 1
+	else
+		OK "Successfully set up Apache2 Private Temp Config."
+	fi
 else
-	OK "Successfully set up Apache2 Private Temp Config."
+	OK "Docker mode: skipping Apache2 systemd PrivateTmp config."
 fi
 
 # Configuring Network Interfaces
 TITLE "Configuring Network..."
 
-# Network config
-if [ ! -L /etc/network/interfaces ]; then
-	mv /etc/network/interfaces /etc/network/interfaces.old
-fi
-if [ -L /etc/network/interfaces ]; then  
-    rm /etc/network/interfaces
-fi
-ln -s $LBHOME/system/network/interfaces /etc/network/interfaces
+if [ $DOCKER_MODE -eq 0 ]; then
+	# Network config
+	if [ ! -L /etc/network/interfaces ]; then
+		mv /etc/network/interfaces /etc/network/interfaces.old
+	fi
+	if [ -L /etc/network/interfaces ]; then
+		rm /etc/network/interfaces
+	fi
+	ln -s $LBHOME/system/network/interfaces /etc/network/interfaces
 
-if [ ! -L /etc/network/interfaces ]; then
-	FAIL "Could not configure Network Interfaces.\n"
-	exit 1
+	if [ ! -L /etc/network/interfaces ]; then
+		FAIL "Could not configure Network Interfaces.\n"
+		exit 1
+	else
+		OK "Successfully configured Network Interfaces."
+	fi
+
+	if [ -e /boot/config.txt ]; then # Enable Wifi on Raspberrys
+		G_CONFIG_INJECT 'dtoverlay=disable-wifi' '#dtoverlay=disable-wifi' /boot/config.txt
+	fi
 else
-	OK "Successfully configured Network Interfaces."
-fi
-
-if [ -e /boot/config.txt ]; then # Enable Wifi on Raspberrys
-	G_CONFIG_INJECT 'dtoverlay=disable-wifi' '#dtoverlay=disable-wifi' /boot/config.txt
+	OK "Docker mode: skipping network interface configuration (managed by Docker)."
 fi
 
 # Configuring Python 3 - reenable pip installations
@@ -690,7 +773,7 @@ fi
 TITLE "Configuring Samba..."
 
 if [ ! -L /etc/samba ]; then
-	mv /etc/samba /etc/samba.old
+	mv /etc/samba /etc/samba.old 2>/dev/null || true
 fi
 if [ -L /etc/samba ]; then
     rm /etc/samba
@@ -710,18 +793,20 @@ else
 	OK "Successfully set up Samba Config."
 fi
 
-if systemctl --no-pager status smbd; then
-	/bin/systemctl restart smbd
-fi
-if systemctl --no-pager status nmbd; then
-	/bin/systemctl restart nmbd
-fi
+if [ $DOCKER_MODE -eq 0 ]; then
+	if systemctl --no-pager status smbd; then
+		/bin/systemctl restart smbd
+	fi
+	if systemctl --no-pager status nmbd; then
+		/bin/systemctl restart nmbd
+	fi
 
-if ! /bin/systemctl --no-pager status smbd; then
-	FAIL "Could not reconfigure Samba.\n"
-	exit 1
-else
-	OK "Successfully reconfigured Samba."
+	if ! /bin/systemctl --no-pager status smbd; then
+		FAIL "Could not reconfigure Samba.\n"
+		exit 1
+	else
+		OK "Successfully reconfigured Samba."
+	fi
 fi
 
 # Add Samba default user
@@ -731,7 +816,7 @@ fi
 TITLE "Configuring VSFTP..."
 
 if [ ! -L /etc/vsftpd.conf ]; then
-	mv /etc/vsftpd.conf /etc/vsftpd.conf.old
+	mv /etc/vsftpd.conf /etc/vsftpd.conf.old 2>/dev/null || true
 fi
 if [ -L /etc/vsftpd.conf ]; then
     rm /etc/vsftpd.conf
@@ -745,22 +830,24 @@ else
 	OK "Successfully set up VSFTPD Config."
 fi
 
-if systemctl --no-pager status vsftpd; then
-	/bin/systemctl restart vsftpd
-fi
+if [ $DOCKER_MODE -eq 0 ]; then
+	if systemctl --no-pager status vsftpd; then
+		/bin/systemctl restart vsftpd
+	fi
 
-if ! /bin/systemctl --no-pager status vsftpd; then
-	FAIL "Could not reconfigure VSFTPD.\n"
-	exit 1
-else
-	OK "Successfully reconfigured VSFTPD."
+	if ! /bin/systemctl --no-pager status vsftpd; then
+		FAIL "Could not reconfigure VSFTPD.\n"
+		exit 1
+	else
+		OK "Successfully reconfigured VSFTPD."
+	fi
 fi
 
 # Configuring MSMTP
 TITLE "Configuring MSMTP..."
 
 if [ -d $LBHOME/system/msmtp ]; then
-	rm /etc/msmtprc
+	rm /etc/msmtprc 2>/dev/null || true
 	ln -s $LBHOME/system/msmtp/msmtprc /etc/msmtprc
 	chmod 0600 $LBHOME/system/msmtp/msmtprc
 fi
@@ -777,7 +864,7 @@ fi
 TITLE "Configuring Cron.d..."
 
 if [ ! -L /etc/cron.d ]; then
-	mv /etc/cron.d /etc/cron.d.orig
+	mv /etc/cron.d /etc/cron.d.orig 2>/dev/null || true
 fi
 if [ -L /etc/cron.d ]; then
     rm /etc/cron.d
@@ -790,7 +877,7 @@ if [ ! -L /etc/cron.d ]; then
 else
 	OK "Successfully set up Cron.d."
 fi
-cp /etc/cron.d.orig/* /etc/cron.d
+cp /etc/cron.d.orig/* /etc/cron.d 2>/dev/null || true
 
 # Skel for system logs, LB system logs and LB plugin logs
 #if [ -d $LBHOME/log/skel_system/ ]; then
@@ -800,107 +887,123 @@ cp /etc/cron.d.orig/* /etc/cron.d
 #    find $LBHOME/log/skel_syslog/ -type f -exec rm {} \;
 #fi
 
-# USB Mounts
-TITLE "Configuring automatic USB Mounts..."
+if [ $DOCKER_MODE -eq 0 ]; then
+	# USB Mounts
+	TITLE "Configuring automatic USB Mounts..."
 
-# Systemd service for usb automount
-mkdir -p /media/usb
-if [ -e /etc/systemd/system/usb-mount@.service ]; then
-	rm /etc/systemd/system/usb-mount@.service
-fi
-ln -s $LBHOME/system/systemd/usb-mount@.service /etc/systemd/system/usb-mount@.service
+	# Systemd service for usb automount
+	mkdir -p /media/usb
+	if [ -e /etc/systemd/system/usb-mount@.service ]; then
+		rm /etc/systemd/system/usb-mount@.service
+	fi
+	ln -s $LBHOME/system/systemd/usb-mount@.service /etc/systemd/system/usb-mount@.service
 
-# Create udev rules for usbautomount
-if [ -e /etc/udev/rules.d/99-usbmount.rules ]; then
-	rm /etc/udev/rules.d/99-usbmount.rules
-fi
-ln -s $LBHOME/system/udev/usbmount.rules /etc/udev/rules.d/99-usbmount.rules
-sed -i -e "s#/opt/loxberry/#$LBHOME/#g" $LBHOME/system/udev/usbmount.rules 
+	# Create udev rules for usbautomount
+	if [ -e /etc/udev/rules.d/99-usbmount.rules ]; then
+		rm /etc/udev/rules.d/99-usbmount.rules
+	fi
+	ln -s $LBHOME/system/udev/usbmount.rules /etc/udev/rules.d/99-usbmount.rules
+	sed -i -e "s#/opt/loxberry/#$LBHOME/#g" $LBHOME/system/udev/usbmount.rules
 
-/bin/systemctl daemon-reload
+	/bin/systemctl daemon-reload
 
-if [ ! -L /etc/systemd/system/usb-mount@.service ]; then
-	FAIL "Could not set up Service for USB-Mount.\n"
-	exit 1
+	if [ ! -L /etc/systemd/system/usb-mount@.service ]; then
+		FAIL "Could not set up Service for USB-Mount.\n"
+		exit 1
+	else
+		OK "Successfully set up service for USB-Mount."
+	fi
+	if [ ! -L /etc/udev/rules.d/99-usbmount.rules ]; then
+		FAIL "Could not set up udev Rules for USB-Mount.\n"
+		exit 1
+	else
+		OK "Successfully set up udev Rules for USB-Mount."
+	fi
+
+	# Configure autofs
+	TITLE "Configuring AutoFS for Samba Netshares..."
+
+	mkdir -p /media/smb
+	if [ -L /etc/creds ]; then
+		rm /etc/creds
+	fi
+	ln -s $LBHOME/system/samba/credentials /etc/creds
+	sed -i -e "s#/opt/loxberry/#$LBHOME/#g" $LBHOME/system/autofs/loxberry_smb.autofs
+	ln -s $LBHOME/system/autofs/loxberry_smb.autofs /etc/auto.master.d/loxberry_smb.autofs
+	chmod 0755 $LBHOME/system/autofs/loxberry_smb.autofs
+	rm $LBHOME/system/storage/smb/.dummy 2>/dev/null || true
+	/bin/systemctl restart autofs
+
+	if ! /bin/systemctl --no-pager status autofs; then
+		FAIL "Could not reconfigure AutoFS.\n"
+		exit 1
+	else
+		OK "Successfully reconfigured AutoFS."
+	fi
 else
-	OK "Successfully set up service for USB-Mount."
-fi
-if [ ! -L /etc/udev/rules.d/99-usbmount.rules ]; then
-	FAIL "Could not set up udev Rules for USB-Mount.\n"
-	exit 1
-else
-	OK "Successfully set up udev Rules for USB-Mount."
-fi
-
-# Configure autofs
-TITLE "Configuring AutoFS for Samba Netshares..."
-
-mkdir -p /media/smb
-if [ -L /etc/creds ]; then
-    rm /etc/creds
-fi
-ln -s $LBHOME/system/samba/credentials /etc/creds
-sed -i -e "s#/opt/loxberry/#$LBHOME/#g" $LBHOME/system/autofs/loxberry_smb.autofs
-ln -s $LBHOME/system/autofs/loxberry_smb.autofs /etc/auto.master.d/loxberry_smb.autofs
-chmod 0755 $LBHOME/system/autofs/loxberry_smb.autofs
-rm $LBHOME/system/storage/smb/.dummy
-/bin/systemctl restart autofs
-
-if ! /bin/systemctl --no-pager status autofs; then
-	FAIL "Could not reconfigure AutoFS.\n"
-	exit 1
-else
-	OK "Successfully reconfigured AutoFS."
+	OK "Docker mode: skipping USB mount and autofs configuration."
 fi
 
 # Config for watchdog
 TITLE "Configuring Watchdog..."
 
-/bin/systemctl disable watchdog.service
-/bin/systemctl stop watchdog.service
+if [ $DOCKER_MODE -eq 0 ]; then
+	/bin/systemctl disable watchdog.service
+	/bin/systemctl stop watchdog.service
 
-if [ ! -L /etc/watchdog.conf ]; then
-	mv /etc/watchdog.conf /etc/watchdog.orig
-fi
-if [ -L /etc/watchdog.conf ]; then
-    rm /etc/watchdog.conf
-fi
-if ! cat /etc/default/watchdog | grep -q -e "watchdog_options"; then
-	echo 'watchdog_options="-v"' >> /etc/default/watchdog
-fi
-if ! cat /etc/default/watchdog | grep -q -e "watchdog_options.*-v"; then
-	/bin/sed -i 's#watchdog_options="\(.*\)"#watchdog_options="\1 -v"#' /etc/default/watchdog
-fi
-sed -i -e "s#/opt/loxberry/#$LBHOME/#g" $LBHOME/system/watchdog/rsyslog.conf
-ln -f -s $LBHOME/system/watchdog/watchdog.conf /etc/watchdog.conf
-ln -f -s $LBHOME/system/watchdog/rsyslog.conf /etc/rsyslog.d/10-watchdog.conf
-/bin/systemctl restart rsyslog.service
+	if [ ! -L /etc/watchdog.conf ]; then
+		mv /etc/watchdog.conf /etc/watchdog.orig 2>/dev/null || true
+	fi
+	if [ -L /etc/watchdog.conf ]; then
+		rm /etc/watchdog.conf
+	fi
+	if ! cat /etc/default/watchdog | grep -q -e "watchdog_options"; then
+		echo 'watchdog_options="-v"' >> /etc/default/watchdog
+	fi
+	if ! cat /etc/default/watchdog | grep -q -e "watchdog_options.*-v"; then
+		/bin/sed -i 's#watchdog_options="\(.*\)"#watchdog_options="\1 -v"#' /etc/default/watchdog
+	fi
+	sed -i -e "s#/opt/loxberry/#$LBHOME/#g" $LBHOME/system/watchdog/rsyslog.conf
+	ln -f -s $LBHOME/system/watchdog/watchdog.conf /etc/watchdog.conf
+	ln -f -s $LBHOME/system/watchdog/rsyslog.conf /etc/rsyslog.d/10-watchdog.conf
+	/bin/systemctl restart rsyslog.service
 
-if [ ! -L /etc/watchdog.conf ]; then
-	FAIL "Could not reconfigure Watchdog.\n"
-	exit 1
+	if [ ! -L /etc/watchdog.conf ]; then
+		FAIL "Could not reconfigure Watchdog.\n"
+		exit 1
+	else
+		OK "Successfully reconfigured Watchdog."
+	fi
 else
-	OK "Successfully reconfigured Watchdog."
+	OK "Docker mode: skipping Watchdog configuration."
 fi
 
 # Activating i2c
 TITLE "Enabling I2C (if supported)..."
 
-/boot/dietpi/func/dietpi-set_hardware i2c enable
+if [ $DOCKER_MODE -eq 0 ]; then
+	/boot/dietpi/func/dietpi-set_hardware i2c enable
+else
+	OK "Docker mode: skipping I2C configuration."
+fi
 
 # Set hosts environment
 TITLE "Setting hosts environment..."
 
-rm /etc/network/if-up.d/001hosts
-rm /etc/dhcp/dhclient-exit-hooks.d/sethosts
-ln -f -s $LBHOME/sbin/sethosts.sh /etc/network/if-up.d/001host
-ln -f -s $LBHOME/sbin/sethosts.sh /etc/dhcp/dhclient-exit-hooks.d/sethosts 
+if [ $DOCKER_MODE -eq 0 ]; then
+	rm /etc/network/if-up.d/001hosts 2>/dev/null || true
+	rm /etc/dhcp/dhclient-exit-hooks.d/sethosts 2>/dev/null || true
+	ln -f -s $LBHOME/sbin/sethosts.sh /etc/network/if-up.d/001host
+	ln -f -s $LBHOME/sbin/sethosts.sh /etc/dhcp/dhclient-exit-hooks.d/sethosts
 
-if [ ! -L /etc/network/if-up.d/001host ]; then
-	FAIL "Could not set host environment.\n"
-	exit 1
+	if [ ! -L /etc/network/if-up.d/001host ]; then
+		FAIL "Could not set host environment.\n"
+		exit 1
+	else
+		OK "Successfully set host environment."
+	fi
 else
-	OK "Successfully set host environment."
+	OK "Docker mode: skipping host environment hook (not needed in Docker)."
 fi
 
 # Configure listchanges to have no output - for apt beeing non-interactive
@@ -943,53 +1046,76 @@ else
 	OK "Successfully reconfigured Unattended Updates."
 fi
 
-/bin/systemctl enable unattended-upgrades
+if [ $DOCKER_MODE -eq 0 ]; then
+	/bin/systemctl enable unattended-upgrades
 
-if ! /bin/systemctl is-enabled unattended-upgrades; then
-	FAIL "Could not enable  Unattended Updates.\n"
-	exit 1
-else
-	OK "Successfully enabled Unattended Updates."
+	if ! /bin/systemctl is-enabled unattended-upgrades; then
+		FAIL "Could not enable  Unattended Updates.\n"
+		exit 1
+	else
+		OK "Successfully enabled Unattended Updates."
+	fi
 fi
 
 # Enable LoxBerry Update after next reboot
 TITLE "Enable LoxBerry update after next reboot..."
 
-touch /boot/do_lbupdate
+if [ $DOCKER_MODE -eq 0 ]; then
+	touch /boot/do_lbupdate
 
-if [ ! -e /boot/do_lbupdate ]; then
-	FAIL "Could not enable LoxBerry Update.\n"
-	exit 1
+	if [ ! -e /boot/do_lbupdate ]; then
+		FAIL "Could not enable LoxBerry Update.\n"
+		exit 1
+	else
+		OK "Successfully enabled LoxBerry Update."
+	fi
 else
-	OK "Successfully enabled LoxBerry Update."
+	OK "Docker mode: skipping /boot/do_lbupdate (not applicable in Docker)."
 fi
 
 # Automatically repair filesystem errors on boot
 TITLE "Automatically repair filesystem errors on boot..."
 
-if [ ! -f /etc/default/rcS ]; then
-	echo "FSCKFIX=yes" > /etc/default/rcS
-else
-	if ! cat /etc/default/rcS | grep -q "FSCKFIX"; then
-		echo "FSCKFIX=yes" >> /etc/default/rcS
+if [ $DOCKER_MODE -eq 0 ]; then
+	if [ ! -f /etc/default/rcS ]; then
+		echo "FSCKFIX=yes" > /etc/default/rcS
+	else
+		if ! cat /etc/default/rcS | grep -q "FSCKFIX"; then
+			echo "FSCKFIX=yes" >> /etc/default/rcS
+		fi
 	fi
-fi
 
-if [ ! -f /etc/default/rcS ]; then
-	FAIL "Could not configure FSCK / rcS.\n"
-	exit 1
+	if [ ! -f /etc/default/rcS ]; then
+		FAIL "Could not configure FSCK / rcS.\n"
+		exit 1
+	else
+		OK "Successfully configured FSCK / rcS."
+	fi
 else
-	OK "Successfully configured FSCK / rcS."
+	OK "Docker mode: skipping FSCK / rcS configuration."
 fi
 
 # Disable SSH Root password access
 TITLE "Disable root login via ssh and password..."
 
-/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins root
+if [ $DOCKER_MODE -eq 0 ]; then
+	/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins root
+else
+	# In Docker mode, configure sshd directly if it exists
+	if [ -e /etc/ssh/sshd_config ]; then
+		sed -i 's/^PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+	fi
+fi
 
 # Installing NodeJS
 TITLE "Installing NodeJS"
-/boot/dietpi/dietpi-software install 9
+if [ $DOCKER_MODE -eq 1 ]; then
+	# Install NodeJS via NodeSource for Docker
+	curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+	apt-get --no-install-recommends -y install nodejs
+else
+	/boot/dietpi/dietpi-software install 9
+fi
 
 # Installing YARN
 TITLE "Installing Yarn"
@@ -1043,25 +1169,43 @@ chown -R loxberry:loxberry $LBHOME/webfrontend/html/system/tools/mqtt
 
 # Set Timezone to LoxBerry's Standard
 TITLE "Setting Timezone to Default..."
-timedatectl set-timezone Europe/Berlin
-timedatectl
+if [ $DOCKER_MODE -eq 0 ]; then
+	timedatectl set-timezone Europe/Berlin
+	timedatectl
+else
+	# In Docker mode, set timezone via /etc/localtime
+	ln -sf /usr/share/zoneinfo/Europe/Berlin /etc/localtime
+	echo "Europe/Berlin" > /etc/timezone
+	dpkg-reconfigure -f noninteractive tzdata 2>/dev/null || true
+	OK "Docker mode: Timezone set to Europe/Berlin."
+fi
 
 # Restart Systemd Login Service
 TITLE "Correct Systemd Login Service..."
 
-/bin/systemctl unmask systemd-logind.service
-/bin/systemctl start systemd-logind.service
+if [ $DOCKER_MODE -eq 0 ]; then
+	/bin/systemctl unmask systemd-logind.service
+	/bin/systemctl start systemd-logind.service
+else
+	OK "Docker mode: skipping systemd-logind (not available in Docker)."
+fi
 
 # Start Apache
 TITLE "Start Apache2 Webserver..."
 
-/bin/systemctl restart apache2
+if [ $DOCKER_MODE -eq 0 ]; then
+	/bin/systemctl restart apache2
 
-if ! /bin/systemctl --no-pager status apache2; then
-       FAIL "Could not reconfigure Apache2.\n"
-       exit 1
+	if ! /bin/systemctl --no-pager status apache2; then
+		FAIL "Could not reconfigure Apache2.\n"
+		exit 1
+	else
+		OK "Successfully reconfigured Apache2."
+	fi
 else
-       OK "Successfully reconfigured Apache2."
+	# In Docker mode, start Apache directly
+	apache2ctl start 2>/dev/null || service apache2 start 2>/dev/null || true
+	OK "Docker mode: Apache2 started (will be managed by entrypoint)."
 fi
 
 # Install some default configs for root
@@ -1085,12 +1229,19 @@ fi
 export PERL5LIB=$LBHOME/libs/perllib
 IP=$(perl -e 'use LoxBerry::System; $ip = LoxBerry::System::get_localip(); print $ip; exit;')
 echo -e "\n\n\n${GREEN}WE ARE DONE! :-)${RESET}"
-echo -e "\n\n${RED}You have to reboot your LoxBerry now!${RESET}"
-echo -e "\n${GREEN}Then point your browser to http://$IP or http://loxberry"
-echo -e "\nIf you would like to login via SSH, use user 'loxberry' and pass 'loxberry'."
-echo -e "Root's password is 'loxberry', too (you cannot login directly via SSH)."
-echo -e "\nGood Bye.\n\n${RESET}"
-
-touch /boot/rootfsresized
+if [ $DOCKER_MODE -eq 0 ]; then
+	echo -e "\n\n${RED}You have to reboot your LoxBerry now!${RESET}"
+	echo -e "\n${GREEN}Then point your browser to http://$IP or http://loxberry"
+	echo -e "\nIf you would like to login via SSH, use user 'loxberry' and pass 'loxberry'."
+	echo -e "Root's password is 'loxberry', too (you cannot login directly via SSH)."
+	echo -e "\nGood Bye.\n\n${RESET}"
+	touch /boot/rootfsresized
+else
+	echo -e "\n${GREEN}Docker installation complete!"
+	echo -e "Point your browser to http://$IP or http://loxberry"
+	echo -e "\nIf you would like to login via SSH, use user 'loxberry' and pass 'loxberry'."
+	echo -e "Root's password is 'loxberry', too (you cannot login directly via SSH)."
+	echo -e "\nGood Bye.\n\n${RESET}"
+fi
 
 exit 0

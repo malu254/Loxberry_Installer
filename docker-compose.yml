@@ -1,0 +1,39 @@
+# docker-compose.yml — uses the pre-built image from GitHub Container Registry.
+# Pull the latest image and start LoxBerry:
+#
+#   docker compose pull && docker compose up -d
+#
+# To build the image locally instead, use docker-compose.build.yml:
+#
+#   docker compose -f docker-compose.build.yml up -d
+
+services:
+  loxberry:
+    # Image published automatically to GHCR by the CI/CD pipeline.
+    # Replace "latest" with a specific version tag (e.g. "3.0.1.3") if needed.
+    image: ghcr.io/malu254/loxberry:latest
+    container_name: loxberry
+    hostname: loxberry
+    restart: unless-stopped
+    ports:
+      - "80:80"       # HTTP web interface
+      - "443:443"     # HTTPS web interface
+      - "1883:1883"   # MQTT (unencrypted)
+      - "8883:8883"   # MQTT (TLS)
+      - "22:22"       # SSH access
+    volumes:
+      - loxberry_config:/opt/loxberry/config
+      - loxberry_data:/opt/loxberry/data
+      - loxberry_log:/opt/loxberry/log
+    environment:
+      - DOCKER_INSTALL=1
+    cap_add:
+      - SYS_TIME    # Allow time operations
+
+volumes:
+  loxberry_config:
+    driver: local
+  loxberry_data:
+    driver: local
+  loxberry_log:
+    driver: local
