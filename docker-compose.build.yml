@@ -1,17 +1,18 @@
-# docker-compose.yml — uses the pre-built image from GitHub Container Registry.
-# Pull the latest image and start LoxBerry:
+# docker-compose.build.yml — builds the image locally from source.
+# Use this file if you want to build LoxBerry yourself instead of pulling
+# the pre-built image from GHCR.
 #
-#   docker compose pull && docker compose up -d
-#
-# To build the image locally instead, use docker-compose.build.yml:
-#
-#   docker compose -f docker-compose.build.yml up -d
+#   docker compose -f docker-compose.build.yml up -d --build
 
 services:
   loxberry:
-    # Image published automatically to GHCR by the CI/CD pipeline.
-    # Replace "latest" with a specific version tag (e.g. "3.0.1.3") if needed.
-    image: ghcr.io/malu254/loxberry:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Specify a branch (default: master) or a tag (e.g. 3.0.1.3)
+        LBRANCH: master
+        # LBTAG: "3.0.1.3"   # Uncomment to install a specific tagged release
     container_name: loxberry
     hostname: loxberry
     restart: unless-stopped

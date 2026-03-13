@@ -1,0 +1,108 @@
+name: Build & Publish Docker Image to GHCR
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'          # e.g. v3.0.1.3
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:  # allow manual runs
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/loxberry
+
+jobs:
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up QEMU (for multi-platform / ARM builds) ─────────────────────
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # ── 3. Set up Docker Buildx ───────────────────────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── 4. Log in to GHCR (skip on PRs) ──────────────────────────────────────
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 5. Extract metadata (tags & labels) ───────────────────────────────────
+      # Tagging strategy:
+      #   • push to main/master  → ghcr.io/.../loxberry:latest
+      #   • push tag v3.0.1.3    → ghcr.io/.../loxberry:3.0.1.3
+      #                           + ghcr.io/.../loxberry:3.0
+      #                           + ghcr.io/.../loxberry:latest
+      #   • pull request         → image is built but NOT pushed
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # branch "main" or "master" → :latest
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
+            # semver tag v3.0.1.3 → :3.0.1.3, :3.0, :3
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            # any other branch → :<branch-name>
+            type=ref,event=branch,enable=${{ github.ref != format('refs/heads/{0}', 'main') && github.ref != format('refs/heads/{0}', 'master') }}
+            # PR → pr-<number>  (build only, no push)
+            type=ref,event=pr
+          labels: |
+            org.opencontainers.image.title=LoxBerry
+            org.opencontainers.image.description=LoxBerry – Beyond the Limits (Docker image)
+            org.opencontainers.image.url=https://www.loxberry.de
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.vendor=malu254
+
+      # ── 6. Determine LBTAG build arg ──────────────────────────────────────────
+      # For version tags (v3.0.1.3), pass the version number to the installer
+      # so it clones the matching LoxBerry release.  For branch pushes, leave it
+      # empty so the installer uses the default branch (master).
+      - name: Determine LBTAG build arg
+        id: lbtag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "lbtag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "lbtag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 7. Build (and push on non-PR events) ─────────────────────────────────
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            LBTAG=${{ steps.lbtag.outputs.lbtag }}
+          # Use GitHub Actions cache to speed up repeated builds
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
