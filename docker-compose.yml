@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  loxberry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: loxberry
+    hostname: loxberry
+    restart: unless-stopped
+    ports:
+      - "80:80"       # HTTP web interface
+      - "443:443"     # HTTPS web interface
+      - "1883:1883"   # MQTT (unencrypted)
+      - "8883:8883"   # MQTT (TLS)
+      - "22:22"       # SSH access
+    volumes:
+      - loxberry_config:/opt/loxberry/config
+      - loxberry_data:/opt/loxberry/data
+      - loxberry_log:/opt/loxberry/log
+    environment:
+      - DOCKER_INSTALL=1
+    cap_add:
+      - SYS_TIME    # Allow time operations
+
+volumes:
+  loxberry_config:
+    driver: local
+  loxberry_data:
+    driver: local
+  loxberry_log:
+    driver: local
